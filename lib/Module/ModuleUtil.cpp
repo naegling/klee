@@ -8,6 +8,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "klee/Support/ModuleUtil.h"
+#include "FixedPointTransform.h"
 
 #include "klee/Config/Version.h"
 #include "klee/Support/Debug.h"
@@ -469,4 +470,18 @@ bool klee::loadFile(const std::string &fileName, LLVMContext &context,
   }
   modules.push_back(std::move(module));
   return true;
+}
+
+
+bool klee::transformFloatToFixed(llvm::Module *module) {
+
+  FixedPointTransform t(module);
+  if (t.run()) {
+//    std::string Error;
+//    std::unique_ptr<llvm::raw_fd_ostream> os(klee::klee_open_output_file("fp-assembly.ll", Error));
+//    assert(os && !os->has_error() && "unable to open source output");
+//    *os << *module;
+    return true;
+  }
+  return false;
 }

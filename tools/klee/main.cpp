@@ -280,6 +280,14 @@ namespace {
            cl::desc("Link the llvm libc++ library into the bitcode (default=false)"),
            cl::init(false),
            cl::cat(LinkCat));
+  cl::OptionCategory ExpCat("Experimental options",
+                               "These options control some of the experimental features of KLEE.");
+
+  cl::opt<bool>
+  SubstFixedPoint("fixed-point",
+                  cl::desc("Substitute fixed-point arithmetic for floating-point (default=false)"),
+                  cl::init(false),
+                  cl::cat(ExpCat));
 }
 
 namespace klee {
@@ -1251,6 +1259,18 @@ int main(int argc, char **argv, char **envp) {
                                   /*Optimize=*/OptimizeModule,
                                   /*CheckDivZero=*/CheckDivZero,
                                   /*CheckOvershift=*/CheckOvershift);
+  // substitute any fixed point math first, before other libs are loaded
+  if (SubstFixedPoint) {
+    transformFloatToFixed(loadedModules.front().get());
+
+    SmallString<128> Path(Opts.LibraryDir);
+    llvm::sys::path::append(Path, "libkleeRuntimeFixedPoint" + opt_suffix + ".bca");
+    if (!klee::loadFile(Path.c_str(), mainModule->getContext(), loadedModules,
+                        errorMsg))
+      klee_error("error loading FixedPoint support '%s': %s", Path.c_str(),
+                 errorMsg.c_str());
+
+  }
 
   if (WithPOSIXRuntime) {
     SmallString<128> Path(Opts.LibraryDir);

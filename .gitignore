@@ -3,6 +3,7 @@ Release+Asserts/
 Debug/
 Debug+Asserts/
 Output/
+build*/
 
 # commonly used as cmake build directory
 /build

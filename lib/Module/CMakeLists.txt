@@ -20,6 +20,7 @@ set(KLEE_MODULE_COMPONENT_SRCS
   OptNone.cpp
   PhiCleaner.cpp
   RaiseAsm.cpp
+  FixedPointTransform.cpp
 )
 
 klee_add_component(kleeModule

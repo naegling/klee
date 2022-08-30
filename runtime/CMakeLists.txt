@@ -91,12 +91,14 @@ add_subdirectory(Freestanding)
 add_subdirectory(Intrinsic)
 add_subdirectory(klee-libc)
 add_subdirectory(Fortify)
+add_subdirectory(FixedPoint)
 
 set(RUNTIME_LIBRARIES
         RuntimeFreestanding
         RuntimeIntrinsic
         RuntimeKLEELibc
         RuntimeFortify
+        RuntimeFixedPoint
         )
 
 if (ENABLE_KLEE_EH_CXX)
