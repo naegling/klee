@@ -10,7 +10,6 @@
 set(LIB_PREFIX "RuntimeFixedPoint")
 set(SRC_FILES
           fix32.c
-          fix32_sqrt.c
         )
 
 # Build it

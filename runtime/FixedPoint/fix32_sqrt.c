@@ -9,7 +9,7 @@
  * Not sure if someone relies on this behaviour, but not going
  * to break it for now. It doesn't slow the code much overall.
  */
-fix32_t fix32_sqrt(fix32_t inValue)
+fix32_t fix32_sqrt_old(fix32_t inValue)
 {
 	uint8_t  neg = (inValue < 0);
 	uint64_t num = (neg ? -inValue : inValue);

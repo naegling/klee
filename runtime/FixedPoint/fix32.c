@@ -1,8 +1,8 @@
 
 #include "fix32.h"
+#include "klee/klee.h"
 
-static uint8_t clz(uint64_t x)
-{
+static uint8_t clz(uint64_t x) {
   uint8_t result = 0;
   if (x == 0) return 64;
   while (!(x & 0xF000000000000000)) { result += 4; x <<= 4; }
@@ -22,8 +22,8 @@ fix32_t fix32_sub(fix32_t inArg0, fix32_t inArg1) {
  * machines, and I don't have any need for different versions personally. If
  * you do, please share. This is fast enough for me.
  */
-fix32_t fix32_mul(fix32_t inArg0, fix32_t inArg1)
-{
+
+fix32_t fix32_mul(fix32_t inArg0, fix32_t inArg1) {
   // Each argument is divided to 32-bit parts.
   //					AB
   //			*	 CD
@@ -84,8 +84,15 @@ fix32_t fix32_mul(fix32_t inArg0, fix32_t inArg1)
  */
 #if !defined(FIXMATH_OPTIMIZE_8BIT)
 
-fix32_t fix32_div(fix32_t a, fix32_t b)
-{
+fix32_t fix32_div(fix32_t a, fix32_t b) {
+
+  fix32_t result;
+  klee_make_symbolic(&result, sizeof(result), "fix32_div_result");
+  klee_assume(fix32_mul(result, b) == a);
+  return result;
+}
+
+fix32_t fix32_div_old(fix32_t a, fix32_t b) {
   // This uses a hardware 64/64 bit division multiple times, until we have
   // computed all the bits in (a<<33)/b. Usually this takes 1-3 iterations.
 
@@ -157,8 +164,7 @@ fix32_t fix32_div(fix32_t a, fix32_t b)
 }
 #endif
 
-fix32_t fix32_mod(fix32_t x, fix32_t y)
-{
+fix32_t fix32_mod(fix32_t x, fix32_t y) {
 #ifdef FIXMATH_OPTIMIZE_8BIT
   /* The reason we do this, rather than use a modulo operator
    * is that if you don't have a hardware divider, this will result
@@ -175,6 +181,17 @@ fix32_t fix32_mod(fix32_t x, fix32_t y)
 
   return x;
 }
+
+fix32_t fix32_sqrt(fix32_t inValue) {
+
+  fix32_t result;
+  klee_make_symbolic(&result, sizeof(result), "fix32_sqrt_result");
+  klee_assume(inValue >= 0);
+  klee_assume(fix32_mul(result, result) == inValue);
+  return result;
+}
+
+
 
 #ifdef NEVER
 
