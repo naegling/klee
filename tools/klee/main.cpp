@@ -288,6 +288,12 @@ namespace {
                   cl::desc("Substitute fixed-point arithmetic for floating-point (default=false)"),
                   cl::init(false),
                   cl::cat(ExpCat));
+  cl::opt<bool>
+  PrepareOnly("prep-only",
+              cl::desc("Prepare module for symex and then exit (default=false)"),
+              cl::init(false),
+              cl::cat(ExpCat));
+
 }
 
 namespace klee {
@@ -1406,6 +1412,11 @@ int main(int argc, char **argv, char **envp) {
   // locale and other data and then calls main.
 
   auto finalModule = interpreter->setModule(loadedModules, Opts);
+
+  if (PrepareOnly) {
+    exit(0);
+  }
+
   Function *mainFn = finalModule->getFunction(EntryPoint);
   if (!mainFn) {
     klee_error("Entry function '%s' not found in module.", EntryPoint.c_str());

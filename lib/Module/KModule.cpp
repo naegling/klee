@@ -340,20 +340,23 @@ void KModule::manifest(InterpreterHandler *ih, bool forceSourceOutput) {
 }
 
 void KModule::checkModule() {
-  InstructionOperandTypeCheckPass *operandTypeCheckPass =
-      new InstructionOperandTypeCheckPass();
 
-  legacy::PassManager pm;
-  if (!DontVerify)
-    pm.add(createVerifierPass());
-  pm.add(operandTypeCheckPass);
-  pm.run(*module);
+  if (!DontVerify) {
+    InstructionOperandTypeCheckPass *operandTypeCheckPass =
+        new InstructionOperandTypeCheckPass();
 
-  // Enforce the operand type invariants that the Executor expects.  This
-  // implicitly depends on the "Scalarizer" pass to be run in order to succeed
-  // in the presence of vector instructions.
-  if (!operandTypeCheckPass->checkPassed()) {
-    klee_error("Unexpected instruction operand types detected");
+    legacy::PassManager pm;
+    if (!DontVerify)
+      pm.add(createVerifierPass());
+    pm.add(operandTypeCheckPass);
+    pm.run(*module);
+
+    // Enforce the operand type invariants that the Executor expects.  This
+    // implicitly depends on the "Scalarizer" pass to be run in order to succeed
+    // in the presence of vector instructions.
+    if (!operandTypeCheckPass->checkPassed()) {
+      klee_error("Unexpected instruction operand types detected");
+    }
   }
 }
 

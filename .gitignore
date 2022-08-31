@@ -5,6 +5,9 @@ Debug+Asserts/
 Output/
 build*/
 
+# qt-creator project file
+CMakeLists.txt.user
+
 # commonly used as cmake build directory
 /build
 
