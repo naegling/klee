@@ -30,13 +30,11 @@ class FixedPointTransform {
   llvm::Type *flt_t;
   llvm::Type *i32_t;
   llvm::Type *i64_t;
-  llvm::FunctionType *binop_t;
-  llvm::FunctionType *uniop_t;
   static const std::map<uint64_t, uint64_t> map_predicates;
   const uint64_t fix32_one = 0x0000000100000000;          /*!< fix32_t value of 1 */
 
-  std::map<uint64_t,std::pair<std::string,llvm::Function*>> map_binops;
-  llvm::Function *fn_sqrt;
+  std::map<uint64_t,llvm::Function*> map_ins2fns;
+  std::map<llvm::Function*,llvm::Function*> map_fns2fns;
   std::set<llvm::MDNode *> visitedMetadata;
 
   unsigned countIndirection(llvm::Type *base, llvm::Type *src) const;
