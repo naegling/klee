@@ -137,6 +137,8 @@ static bool linkTwoModules(llvm::Module *Dest,
                            std::unique_ptr<llvm::Module> Src,
                            std::string &errorMsg) {
   // Get the potential error message (Src is moved and won't be available later)
+  outs() << "Linking module " << Src->getModuleIdentifier() << "\n";
+  outs().flush();
   errorMsg = "Linking module " + Src->getModuleIdentifier() + " failed";
   auto linkResult = Linker::linkModules(*Dest, std::move(Src));
 

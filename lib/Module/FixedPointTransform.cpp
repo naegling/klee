@@ -7,6 +7,7 @@
 #include <llvm/IR/IntrinsicInst.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
+#include <llvm/IR/TypeFinder.h>
 #include <llvm/IR/DebugInfoMetadata.h>
 
 #include <set>
@@ -33,32 +34,34 @@ namespace klee {
 // FCMP_UNE    NE
 // FCMP_TRUE
 
-const map<uint64_t, uint64_t> FixedPointTransform::map_predicates {
-    //    { CmpInst::Predicate::FCMP_FALSE, CmpInst::Predicate::ICMP_FALSE },
-    {CmpInst::Predicate::FCMP_OEQ, CmpInst::Predicate::ICMP_EQ},
-    {CmpInst::Predicate::FCMP_OGT, CmpInst::Predicate::ICMP_SGT},
-    {CmpInst::Predicate::FCMP_OGE, CmpInst::Predicate::ICMP_SGE},
-    {CmpInst::Predicate::FCMP_OLT, CmpInst::Predicate::ICMP_SLT},
-    {CmpInst::Predicate::FCMP_OLE, CmpInst::Predicate::ICMP_SLE},
-    {CmpInst::Predicate::FCMP_ONE, CmpInst::Predicate::ICMP_NE},
-//    {CmpInst::Predicate::FCMP_ORD, CmpInst::Predicate::ICMP_TRUE },
-//    {CmpInst::Predicate::FCMP_UNO, CmpInst::Predicate::ICMP_FALSE },
-    {CmpInst::Predicate::FCMP_UEQ, CmpInst::Predicate::ICMP_EQ},
-    {CmpInst::Predicate::FCMP_UGT, CmpInst::Predicate::ICMP_SGT},
-    {CmpInst::Predicate::FCMP_UGE, CmpInst::Predicate::ICMP_SGE},
-    {CmpInst::Predicate::FCMP_ULT, CmpInst::Predicate::ICMP_SLT},
-    {CmpInst::Predicate::FCMP_ULE, CmpInst::Predicate::ICMP_SLE},
-    {CmpInst::Predicate::FCMP_UNE, CmpInst::Predicate::ICMP_NE}
-    //    { CmpInst::Predicate::FCMP_TRUE, CmpInst::Predicate::ICMP_NE }
-};
+FixedPointTransform::FixedPointTransform(Module *M) : module(M) {
 
-FixedPointTransform::FixedPointTransform(Module *M)
-    : module(M), ctx(M->getContext()) {
+  LLVMContext &ctx = module->getContext();
+  Type *dbl_t = Type::getDoubleTy(ctx);
+  Type *i64_t = Type::getInt64Ty(ctx);
+  Type *flt_t = Type::getFloatTy(ctx);
+  Type *i32_t = Type::getInt32Ty(ctx);
 
-  dbl_t = Type::getDoubleTy(ctx);
-  flt_t = Type::getFloatTy(ctx);
-  i32_t = Type::getInt32Ty(ctx);
-  i64_t = Type::getInt64Ty(ctx);
+  map_predicates = {
+      //    { CmpInst::Predicate::FCMP_FALSE, CmpInst::Predicate::ICMP_FALSE },
+      {CmpInst::Predicate::FCMP_OEQ, CmpInst::Predicate::ICMP_EQ},
+      {CmpInst::Predicate::FCMP_OGT, CmpInst::Predicate::ICMP_SGT},
+      {CmpInst::Predicate::FCMP_OGE, CmpInst::Predicate::ICMP_SGE},
+      {CmpInst::Predicate::FCMP_OLT, CmpInst::Predicate::ICMP_SLT},
+      {CmpInst::Predicate::FCMP_OLE, CmpInst::Predicate::ICMP_SLE},
+      {CmpInst::Predicate::FCMP_ONE, CmpInst::Predicate::ICMP_NE},
+      //    {CmpInst::Predicate::FCMP_ORD, CmpInst::Predicate::ICMP_TRUE },
+      //    {CmpInst::Predicate::FCMP_UNO, CmpInst::Predicate::ICMP_FALSE },
+      {CmpInst::Predicate::FCMP_UEQ, CmpInst::Predicate::ICMP_EQ},
+      {CmpInst::Predicate::FCMP_UGT, CmpInst::Predicate::ICMP_SGT},
+      {CmpInst::Predicate::FCMP_UGE, CmpInst::Predicate::ICMP_SGE},
+      {CmpInst::Predicate::FCMP_ULT, CmpInst::Predicate::ICMP_SLT},
+      {CmpInst::Predicate::FCMP_ULE, CmpInst::Predicate::ICMP_SLE},
+      {CmpInst::Predicate::FCMP_UNE, CmpInst::Predicate::ICMP_NE}
+      //    { CmpInst::Predicate::FCMP_TRUE, CmpInst::Predicate::ICMP_NE }
+  };
+
+  map_basic_ty = {{dbl_t, i64_t}, {flt_t, i32_t}};
 
   vector<Type*> binop_args = { i64_t, i64_t};
   vector<Type*> uniop_args = { i64_t};
@@ -102,60 +105,108 @@ FixedPointTransform::FixedPointTransform(Module *M)
   }
 }
 
-unsigned FixedPointTransform::countIndirection(Type *base, Type *src) const {
+void FixedPointTransform::reset_types() {
+  map_struct_ty.clear();
+}
+
+std::pair<llvm::Type*,unsigned> FixedPointTransform::unwrap_type(llvm::Type* ty) const {
 
   unsigned cnt = 0;
-  while (src->isPointerTy()) {
-    src = src->getPointerElementType();
+  while (ty->isPointerTy()) {
+    ty = ty->getPointerElementType();
     cnt++;
   }
-  return (base == src) ? cnt + 1 : 0;
+  return make_pair(ty, cnt + 1);
 }
 
-Type *FixedPointTransform::getIndirect(Type *base, unsigned count) const {
+llvm::Type *FixedPointTransform::rewrap_type(llvm::Type *ty, unsigned cnt) const {
 
-  assert(base != nullptr);
-
-  while (count > 1) {
-    base = base->getPointerTo();
-    count--;
+  assert(ty != nullptr);
+  while (cnt > 1) {
+    ty = ty->getPointerTo();
+    cnt--;
   }
-  return (count == 0 ? nullptr : base);
+  return ty;
 }
 
-Type *FixedPointTransform::getEquivalentIndirect(Type *src, Type *old_base, Type *new_base) const {
+Type *FixedPointTransform::transformFP(Type *ty) const {
 
   Type *result = nullptr;
-  unsigned cnt = countIndirection(old_base, src);
-  if (cnt > 0) {
-    result = getIndirect(new_base, cnt);
-  }
-  return result;
-}
-
-Type *FixedPointTransform::transformFP(Type *src) const {
-
-  Type *result = getEquivalentIndirect(src, dbl_t, i64_t);
-  if (result == nullptr) {
-    result = getEquivalentIndirect(src, flt_t, i32_t);
+  auto pr = unwrap_type(ty);
+  auto itr = map_basic_ty.find(pr.first);
+  if (itr != map_basic_ty.end()) {
+    result = rewrap_type(itr->second, pr.second);
+  } else if (StructType *sty = dyn_cast<StructType>(pr.first)) {
+    auto itr = map_struct_ty.find(sty);
+    if (itr != map_struct_ty.end()) {
+      result = rewrap_type(itr->second, pr.second);
+    }
   }
   return result;
 }
 
 bool FixedPointTransform::run() {
 
+  LLVMContext &ctx = module->getContext();
+
   // cannot remove replaced instructions during iteration, so keep a set to drop
   // later
   set<Instruction *> remove_ins;
   set<Function *> remove_fns;
 
+  // find all fp types embedded in structs and unions
+
+  // get a set of all structures
+  TypeFinder finder;
+  finder.run(*module, false);
+  set<StructType*> all_structs;
+  for (StructType *sty : finder) {
+    all_structs.insert(sty);
+  }
+
+  // this has to be iteratively updated until all affected structs are identified
+  // i.e. we need the transitive closure
+  unsigned num_prior = 0;
+  while (num_prior < map_struct_ty.size() + 1) {
+    num_prior = map_struct_ty.size() + 1;
+    for (StructType *sty : all_structs) {
+      for (unsigned idx = 0, end = sty->getNumElements(); idx < end; ++idx) {
+        if (isFP(sty->getElementType(idx))) {
+          // sty will need to be recreated due to changed struct
+          map_struct_ty.insert(make_pair(sty, StructType::create(ctx)));
+        }
+      }
+    }
+  }
+
+  // now have a complete list of structures to be re-written
+  // create the new structures
+  for (auto pr : map_struct_ty) {
+    StructType *old_sty = pr.first;
+    StructType *new_sty = pr.second;
+    string st_name = old_sty->getName().str();
+    old_sty->setName(st_name + ".delete.me");
+    new_sty->setName(st_name);
+
+    vector<Type*> members;
+    for (unsigned idx = 0, end = old_sty->getNumElements(); idx < end; ++idx) {
+      Type *mem_ty = old_sty->getElementType(idx);
+      if (Type *new_ty = transformFP(mem_ty)) {
+        members.push_back(new_ty);
+      } else {
+        members.push_back(mem_ty);
+      }
+    }
+    new_sty->setBody(members, old_sty->isPacked());
+  }
+
   // global variables, cannot add or delete during iteration, so just create a record of gvs to replace
   map<GlobalVariable*,Type*> map_gvs;
   for (auto itr = module->global_begin(), end = module->global_end(); itr != end; ++itr) {
     GlobalVariable *gv = &(*itr);
-    Type *old_t = gv->getValueType();
-    if (Type *new_t = transformFP(old_t)) {
-      map_gvs.insert(make_pair(gv, new_t));
+    Type *old_ty = gv->getValueType();
+    if (Type *new_ty = transformFP(old_ty)) {
+      map_gvs.insert(make_pair(gv, new_ty));
     }
   }
 
@@ -164,40 +215,23 @@ bool FixedPointTransform::run() {
     GlobalVariable *old_gv = itr->first;
     Type *new_t = itr->second;
 
-    Constant *new_init = nullptr;
-    if (old_gv->hasInitializer()) {
-      if (Constant *old_init = old_gv->getInitializer()) {
-        if (auto fp_init = dyn_cast<ConstantFP>(old_init)) {
-          APSInt i_value;
-          const APFloat &fv = fp_init->getValueAPF();
-          double dbl = fv.convertToDouble() * fix32_one;
-          new_init = ConstantInt::get(new_t, (uint64_t) dbl);
-        } else {
-          new_init = old_init;
-        }
-      }
-    }
-
     // rename the old gv so we can bequeath its name to the new gv
     string gv_name = old_gv->getName().str();
     old_gv->setName(gv_name + ".delete.me");
-    GlobalVariable *new_gv = new GlobalVariable(*module,
-                                                new_t,
-                                                old_gv->isConstant(),
-                                                old_gv->getLinkage(),
-                                                new_init,
-                                                gv_name,
-                                                old_gv,
-                                                old_gv->getThreadLocalMode(),
-                                                old_gv->getAddressSpace(),
-                                                old_gv->isExternallyInitialized());
+
+    // RLR TODO: this only sets the new global to have the default initializer.
+    Constant *init = ConstantAggregateZero::get(new_t);
+    GlobalVariable *new_gv = new GlobalVariable(*module, new_t, old_gv->isConstant(), old_gv->getLinkage(), init, gv_name, old_gv);
+    new_gv->copyAttributesFrom(old_gv);
+
+    // replace uses of the old with the new, and drop the old
+    // the old structs cannot be explicitly dropped, they drop from context with
+    // the last instance does.
     old_gv->replaceAllUsesWith(new_gv);
     old_gv->eraseFromParent();
   }
 
   // aliases
-
-  // ? structures/unions/etc ?
 
   for (Function &fn : *module) {
 
@@ -216,7 +250,7 @@ bool FixedPointTransform::run() {
             APSInt i_value;
             const APFloat &fv = CFP->getValueAPF();
             double dbl = fv.convertToDouble() * fix32_one;
-            in.setOperand(idx, ConstantInt::get(i64_t, (uint64_t)dbl));
+            in.setOperand(idx, ConstantInt::get(Type::getInt64Ty(ctx), (uint64_t) dbl));
           }
         }
 
@@ -345,6 +379,17 @@ bool FixedPointTransform::run() {
     fn->eraseFromParent();
   }
   return true;
+}
+
+bool FixedPointTransform::isFP(Type *ty) const {
+  bool result = false;
+  auto pr = unwrap_type(ty);
+  if (map_basic_ty.count(pr.first) > 0) {
+    result = true;
+  } else if (StructType *sty = dyn_cast<StructType>(pr.first)) {
+    result = map_struct_ty.count(sty) > 0;
+  }
+  return result;
 }
 
 void FixedPointTransform::traverseValue(Value *value) {

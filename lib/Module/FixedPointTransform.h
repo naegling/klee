@@ -14,9 +14,9 @@ class Module;
 class FunctionType;
 class Function;
 class Type;
+class StructType;
 class MDNode;
 class Value;
-
 }
 
 
@@ -25,26 +25,23 @@ namespace klee {
 class FixedPointTransform {
 
   llvm::Module *module;
-  llvm::LLVMContext &ctx;
-  llvm::Type *dbl_t;
-  llvm::Type *flt_t;
-  llvm::Type *i32_t;
-  llvm::Type *i64_t;
-  static const std::map<uint64_t, uint64_t> map_predicates;
+  std::map<uint64_t, uint64_t> map_predicates;
+  std::map<llvm::Type*,llvm::Type*> map_basic_ty;
   const uint64_t fix32_one = 0x0000000100000000;          /*!< fix32_t value of 1 */
 
   std::map<uint64_t,llvm::Function*> map_ins2fns;
   std::map<llvm::Function*,llvm::Function*> map_fns2fns;
-  std::set<llvm::MDNode *> visitedMetadata;
+  std::map<llvm::StructType*,llvm::StructType*> map_struct_ty;
 
-  unsigned countIndirection(llvm::Type *base, llvm::Type *src) const;
-  llvm::Type *getIndirect(llvm::Type *base, unsigned count) const;
-  llvm::Type *getEquivalentIndirect(llvm::Type *src, llvm::Type *old_base, llvm::Type *new_base) const;
-  llvm::Type *transformFP(llvm::Type *src) const;
+  std::pair<llvm::Type*,unsigned> unwrap_type(llvm::Type* ty) const;
+  llvm::Type *rewrap_type(llvm::Type *ty, unsigned cnt) const;
+  llvm::Type *transformFP(llvm::Type *ty) const;
+  bool isFP(llvm::Type *ty) const;
+
+  std::set<llvm::MDNode *> visitedMetadata;
   void traverseMDNode(llvm::MDNode *node);
   void traverseValue(llvm::Value *value);
-  bool isFP(const llvm::Type *ty) { return ty == dbl_t || ty == flt_t; }
-
+  void reset_types();
 
 public:
   FixedPointTransform(llvm::Module *M);

@@ -1267,7 +1267,7 @@ int main(int argc, char **argv, char **envp) {
                                   /*CheckOvershift=*/CheckOvershift);
   // substitute any fixed point math first, before other libs are loaded
   if (SubstFixedPoint) {
-    transformFloatToFixed(loadedModules.front().get());
+    transformFloatToFixed(mainModule);
 
     SmallString<128> Path(Opts.LibraryDir);
     llvm::sys::path::append(Path, "libkleeRuntimeFixedPoint" + opt_suffix + ".bca");
