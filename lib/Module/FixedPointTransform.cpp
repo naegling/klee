@@ -8,7 +8,10 @@
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/TypeFinder.h>
+#include <llvm/IR/DebugInfo.h>
 #include <llvm/IR/DebugInfoMetadata.h>
+#include <llvm/Transforms/Utils/Cloning.h>
+#include <llvm/Transforms/Utils/ValueMapper.h>
 
 #include <set>
 
@@ -73,7 +76,9 @@ FixedPointTransform::FixedPointTransform(Module *M) : module(M) {
       {Instruction::FAdd, {"fix32_add", binop_t}},
       {Instruction::FSub, {"fix32_sub", binop_t}},
       {Instruction::FMul, {"fix32_mul", binop_t}},
-      {Instruction::FDiv, {"fix32_div", binop_t}}
+      {Instruction::FDiv, {"fix32_div", binop_t}},
+      {Instruction::SIToFP, {"fix32_SI2FP", uniop_t}},
+      {Instruction::UIToFP, {"fix32_UI2FP", uniop_t}}
   };
 
   static const vector<pair<string,pair<string,FunctionType*>>> sub_fns {
@@ -81,7 +86,8 @@ FixedPointTransform::FixedPointTransform(Module *M) : module(M) {
       {"sin", {"fix32_sin", uniop_t}},
       {"llvm.fabs.f64", {"fix32_abs", uniop_t}},
       {"__isnan__", {"fix32_isnan", i32_uniop_t}},
-      {"__isinf__", {"fix32_isinf", i32_uniop_t}}
+      {"__isinf__", {"fix32_isinf", i32_uniop_t}},
+      {"__isfinite__", {"fix32_isfinite", i32_uniop_t}}
   };
 
   for (auto itr = sub_ins.begin(), end = sub_ins.end(); itr != end; ++itr) {
@@ -94,10 +100,8 @@ FixedPointTransform::FixedPointTransform(Module *M) : module(M) {
   }
 
   for (auto itr = sub_fns.begin(), end = sub_fns.end(); itr != end; ++itr) {
-    string old_name = itr->first;
-    if (Function *old_fn = module->getFunction(old_name)) {
-      string new_name = itr->second.first;
-      Function *new_fn = Function::Create(itr->second.second, Function::ExternalLinkage, new_name, module);
+    if (Function *old_fn = module->getFunction(itr->first)) {
+      Function *new_fn = Function::Create(itr->second.second, Function::ExternalLinkage, itr->second.first, module);
       new_fn->setDSOLocal(true);
       new_fn->addAttribute(AttributeList::FunctionIndex, Attribute::NoInline);
       map_fns2fns.insert(make_pair(old_fn, new_fn));
@@ -132,6 +136,7 @@ llvm::Type *FixedPointTransform::rewrap_type(llvm::Type *ty, unsigned cnt) const
 Type *FixedPointTransform::transformFP(Type *ty) const {
 
   Type *result = nullptr;
+
   auto pr = unwrap_type(ty);
   auto itr = map_basic_ty.find(pr.first);
   if (itr != map_basic_ty.end()) {
@@ -140,6 +145,10 @@ Type *FixedPointTransform::transformFP(Type *ty) const {
     auto itr = map_struct_ty.find(sty);
     if (itr != map_struct_ty.end()) {
       result = rewrap_type(itr->second, pr.second);
+    }
+  } else if (ArrayType *aty = dyn_cast<ArrayType>(pr.first)) {
+    if (auto new_type = transformFP(aty->getElementType())) {
+      result = rewrap_type(ArrayType::get(new_type, aty->getNumElements()), pr.second);
     }
   }
   return result;
@@ -215,14 +224,11 @@ bool FixedPointTransform::run() {
     GlobalVariable *old_gv = itr->first;
     Type *new_t = itr->second;
 
-    // rename the old gv so we can bequeath its name to the new gv
-    string gv_name = old_gv->getName().str();
-    old_gv->setName(gv_name + ".delete.me");
-
     // RLR TODO: this only sets the new global to have the default initializer.
     Constant *init = ConstantAggregateZero::get(new_t);
-    GlobalVariable *new_gv = new GlobalVariable(*module, new_t, old_gv->isConstant(), old_gv->getLinkage(), init, gv_name, old_gv);
+    GlobalVariable *new_gv = new GlobalVariable(*module, new_t, old_gv->isConstant(), old_gv->getLinkage(), init, old_gv->getName(), old_gv);
     new_gv->copyAttributesFrom(old_gv);
+    new_gv->takeName(old_gv);
 
     // replace uses of the old with the new, and drop the old
     // the old structs cannot be explicitly dropped, they drop from context with
@@ -233,11 +239,72 @@ bool FixedPointTransform::run() {
 
   // aliases
 
+  // find all functions that have to be recreated
+  // i.e. those that have FP in signiture
+  map<Function*,FunctionType*> map_func_ty;
   for (Function &fn : *module) {
 
     // operands
+    bool fty_modified = false;
 
-    // arguments
+    if (!fn.isDeclaration()) {
+
+      // construct a new function type
+      FunctionType *old_fty = fn.getFunctionType();
+      Type *new_rty = old_fty->getReturnType();
+      if (Type *new_ty = transformFP(new_rty)) {
+        new_rty = new_ty;
+        fty_modified = true;
+      }
+      vector<Type*> parameters;
+      for (unsigned idx = 0, end = old_fty->getNumParams(); idx < end; ++idx) {
+        Type *param_ty = old_fty->getParamType(idx);
+        if (Type *new_ty = transformFP(param_ty)) {
+          parameters.push_back(new_ty);
+          fty_modified = true;
+        } else {
+          parameters.push_back(param_ty);
+        }
+      }
+      if (fty_modified) {
+        FunctionType *new_fty = FunctionType::get(new_rty, parameters, old_fty->isVarArg());
+        map_func_ty.insert(make_pair(&fn, new_fty));
+      }
+    }
+  }
+
+  set<Function*> modified_fns;
+  for (auto pr : map_func_ty) {
+
+    Function *old_fn = pr.first;
+    FunctionType *new_fty = pr.second;
+    Function *new_fn = Function::Create(new_fty, old_fn->getLinkage(), old_fn->getAddressSpace(), old_fn->getName(), module);
+    ValueToValueMapTy vmap;
+    for (unsigned idx = 0, end = new_fty->getNumParams(); idx < end; ++idx) {
+      const Argument *old_arg = old_fn->getArg(idx);
+      Argument *new_arg = new_fn->getArg(idx);
+      if (old_arg->hasName()) {
+        new_arg->setName(old_arg->getName());
+      }
+      vmap[old_arg] = new_arg;
+    }
+    SmallVector<ReturnInst*, 8> rets;
+    CloneFunctionInto(new_fn, old_fn, vmap, old_fn->getSubprogram() != nullptr, rets);
+    new_fn->takeName(old_fn);
+    old_fn->replaceAllUsesWith(new_fn);
+
+    // if this function was in the map of fns translations, then update it.
+    auto itr = map_fns2fns.find(old_fn);
+    if (itr != map_fns2fns.end()) {
+      Function *trg_fn = itr->second;
+      map_fns2fns.erase(itr);
+      map_fns2fns.insert(make_pair(new_fn, trg_fn));
+    }
+    old_fn->eraseFromParent();
+    modified_fns.insert(new_fn);
+  }
+
+  for (Function &fn : *module) {
 
     // instructions
     for (BasicBlock &bb : fn) {
@@ -273,6 +340,20 @@ bool FixedPointTransform::run() {
             }
             BO->replaceAllUsesWith(call);
             remove_ins.insert(BO);
+          } else if (auto UI = dyn_cast<UnaryInstruction>(&in)) {
+            Function *fn = itr->second;
+            vector<Value*> args = { UI->getOperand(0) };
+            Instruction *call = CallInst::Create(fn, args, "", UI);
+
+            // preserve any metadata
+            SmallVector<pair<unsigned, MDNode *>, 4> mds;
+            UI->getAllMetadata(mds);
+            for (const auto &md : mds) {
+              call->setMetadata(md.first, md.second);
+            }
+            UI->replaceAllUsesWith(call);
+            remove_ins.insert(UI);
+
           } else {
             // well, someone certainly f'ed up ...
             assert(false);
@@ -318,6 +399,34 @@ bool FixedPointTransform::run() {
             }
           } break;
 
+          case Instruction::GetElementPtr: {
+            auto GEP = static_cast<GetElementPtrInst *>(&in);
+            Value *v = GEP->getPointerOperand();
+            if (Type *new_type = transformFP(GEP->getSourceElementType())) {
+              GEP->setSourceElementType(new_type);
+            }
+            if (Type *new_type = transformFP(GEP->getResultElementType())) {
+              GEP->setResultElementType(new_type);
+            }
+            if (Type *new_type = transformFP(GEP->getType())) {
+              GEP->mutateType(new_type);
+            }
+            if (Type *new_type = transformFP(v->getType())) {
+              v->mutateType(new_type);
+            }
+          } break;
+
+          case Instruction::ExtractValue: {
+            auto EV = static_cast<ExtractValueInst *>(&in);
+            Value *v = EV->getAggregateOperand();
+            if (Type *new_type = transformFP(v->getType())) {
+              v->mutateType(new_type);
+            }
+            if (Type *new_type = transformFP(EV->getType())) {
+              EV->mutateType(new_type);
+            }
+          } break;
+
           case Instruction::FCmp: {
             auto *FC = static_cast<FCmpInst *>(&in);
             auto pred = FC->getPredicate();
@@ -340,13 +449,17 @@ bool FixedPointTransform::run() {
 
           case Instruction::Call: {
             auto CI = static_cast<CallInst *>(&in);
-            Function *old_fn = CI->getCalledFunction();
-            auto itr = map_fns2fns.find(old_fn);
+            Function *fn = CI->getCalledFunction();
+            auto itr = map_fns2fns.find(fn);
             if (itr != map_fns2fns.end()) {
               Function *new_fn = itr->second;
               CI->mutateType(new_fn->getReturnType());
+              CI->mutateFunctionType(new_fn->getFunctionType());
               CI->setCalledFunction(new_fn);
-              remove_fns.insert(old_fn);
+              remove_fns.insert(fn);
+            } else if (modified_fns.count(fn) > 0) {
+              CI->mutateFunctionType(fn->getFunctionType());
+              CI->mutateType(fn->getReturnType());
             }
           } break;
 
@@ -375,8 +488,20 @@ bool FixedPointTransform::run() {
   for (auto in : remove_ins) {
     in->eraseFromParent();
   }
+
+  // RLR TODO: hack for some annoying llvm intrinsics
+  set<string> annoying_hack{ "__isnan__", "__isinf__", "__isfinite__" };
+
   for (auto fn : remove_fns) {
-    fn->eraseFromParent();
+    if (annoying_hack.count(fn->getName().str()) == 0) {
+      fn->eraseFromParent();
+    }
+  }
+
+  for (auto &fn_name : annoying_hack) {
+    if (Function *fn = module->getFunction(fn_name)) {
+      fn->deleteBody();
+    }
   }
   return true;
 }

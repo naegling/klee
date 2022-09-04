@@ -200,9 +200,11 @@ InstructionInfoTable::getInfo(const llvm::Instruction &inst) const {
 const FunctionInfo &
 InstructionInfoTable::getFunctionInfo(const llvm::Function &f) const {
   auto found = functionInfos.find(&f);
-  if (found == functionInfos.end())
+  if (found == functionInfos.end()) {
+    std::string fn_name = f.getName().str();
     llvm::report_fatal_error("invalid instruction, not present in "
                              "initial module!");
+  }
 
   return *found->second.get();
 }

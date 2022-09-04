@@ -72,6 +72,10 @@ int fix32_isinf(fix32_t a) {
   return 0;
 }
 
+int fix32_isfinite(fix32_t a) {
+  return !(fix32_isnan(a) || fix32_isinf(a));
+}
+
 fix32_t fix32_sqrt(fix32_t inValue) {
 
   fix32_t result;
