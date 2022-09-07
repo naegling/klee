@@ -46,7 +46,7 @@ class FixedPointTransform {
 public:
   FixedPointTransform(llvm::Module *M);
   bool run();
-
+  static bool stripUnused(llvm::Module *M);
 };
 
 

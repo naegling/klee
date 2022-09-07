@@ -57,6 +57,9 @@ extern "C" {
   __attribute__((noreturn))
   void klee_silent_exit(int status);
 
+  __attribute__((noreturn))
+  void klee_terminate_state();
+
   /* klee_abort - Abort the current KLEE process. */
   __attribute__((noreturn))
   void klee_abort(void);  

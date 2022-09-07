@@ -81,6 +81,7 @@ static SpecialFunctionHandler::HandlerInfo handlerInfo[] = {
   { "exit", &SpecialFunctionHandler::handleExit, true, false, true },
   addDNR("klee_abort", handleAbort),
   addDNR("klee_silent_exit", handleSilentExit),
+  addDNR("klee_terminate_state", handleTerminateState),
   addDNR("klee_report_error", handleReportError),
   add("calloc", handleCalloc, true),
   add("free", handleFree, false),
@@ -308,6 +309,13 @@ void SpecialFunctionHandler::handleSilentExit(
     ExecutionState &state, KInstruction *target,
     std::vector<ref<Expr>> &arguments) {
   assert(arguments.size() == 1 && "invalid number of arguments to exit");
+  executor.terminateStateEarly(state, "", StateTerminationType::SilentExit);
+}
+
+void SpecialFunctionHandler::handleTerminateState(
+    ExecutionState &state, KInstruction *target,
+    std::vector<ref<Expr>> &arguments) {
+  assert(arguments.size() == 0 && "invalid number of arguments to exit");
   executor.terminateStateEarly(state, "", StateTerminationType::SilentExit);
 }
 

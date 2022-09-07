@@ -6,9 +6,13 @@
 int main(int argc, char *argv[]) {
 
   double a;
+  double b;
+  // double c;
   klee_make_symbolic(&a, sizeof(a), "a");
 
-  double b = sqrt(a + 1.0);
+  b = sqrt(a/2);
+  b = sqrt(b/2);
+
   if (b > 1.0)  {
     printf("gt1\n");
   } else if (b < 1.0) {

@@ -66,11 +66,16 @@ FixedPointTransform::FixedPointTransform(Module *M) : module(M) {
 
   map_basic_ty = {{dbl_t, i64_t}, {flt_t, i32_t}};
 
-  vector<Type*> binop_args = { i64_t, i64_t};
-  vector<Type*> uniop_args = { i64_t};
+  vector<Type*> binop_args = {i64_t, i64_t};
+  vector<Type*> uniop_args = {i64_t};
+  vector<Type*> zerop_args = {};
+  vector<Type*> uniop_i32_args = {i32_t};
+
   FunctionType *binop_t = FunctionType::get(i64_t, binop_args, false);
   FunctionType *uniop_t = FunctionType::get(i64_t, uniop_args, false);
   FunctionType *i32_uniop_t = FunctionType::get(i32_t, uniop_args, false);
+  FunctionType *i32_zerop_t = FunctionType::get(i32_t, zerop_args, false);
+  FunctionType *i32_uniop_i32_t = FunctionType::get(i32_t, uniop_i32_args, false);
 
   static const vector<pair<uint64_t,pair<string,FunctionType*>>> sub_ins {
       {Instruction::FAdd, {"fix32_add", binop_t}},
@@ -87,7 +92,9 @@ FixedPointTransform::FixedPointTransform(Module *M) : module(M) {
       {"llvm.fabs.f64", {"fix32_abs", uniop_t}},
       {"__isnan__", {"fix32_isnan", i32_uniop_t}},
       {"__isinf__", {"fix32_isinf", i32_uniop_t}},
-      {"__isfinite__", {"fix32_isfinite", i32_uniop_t}}
+      {"__isfinite__", {"fix32_isfinite", i32_uniop_t}},
+      {"fegetround", {"fix32_fegetround", i32_zerop_t}},
+      {"fesetround", {"fix32_fesetround", i32_uniop_i32_t}}
   };
 
   for (auto itr = sub_ins.begin(), end = sub_ins.end(); itr != end; ++itr) {
@@ -502,6 +509,54 @@ bool FixedPointTransform::run() {
     if (Function *fn = module->getFunction(fn_name)) {
       fn->deleteBody();
     }
+  }
+
+  static set<string> i_know{ "__assert_fail", "klee_make_symbolic", "printf", "klee_range", "fflush" };
+  for (Function &fn : *module) {
+    if (fn.isDeclaration() && fn.getNumUses() > 0) {
+      string fn_name = fn.getName().str();
+      if (fn_name.rfind("fix32_", 0) != 0) {
+        if (fn_name.rfind("llvm.", 0) != 0) {
+          if (i_know.count(fn_name) == 0) {
+            outs() << "!!!!! used fn: " << fn_name << '\n';
+          }
+        }
+      }
+    }
+  }
+  return true;
+}
+
+bool FixedPointTransform::stripUnused(Module *module) {
+
+  bool done = false;
+  while (!done) {
+    done = true;
+    vector<Function*> fns_to_remove;
+    for (Function &fn : *module) {
+      if (fn.hasName() && fn.getName().str().rfind("fix32_", 0) == 0) {
+        if (fn.getNumUses() == 0 && !fn.hasAddressTaken()) {
+          fns_to_remove.push_back(&fn);
+        }
+      }
+    }
+    for (Function *fn : fns_to_remove) {
+      fn->eraseFromParent();
+    }
+
+    vector<GlobalVariable*> gvs_to_remove;
+    for (GlobalVariable &gv : module->globals()) {
+      if (gv.hasName() && gv.getName().str().rfind("fix32_", 0) == 0) {
+        if (gv.getNumUses() == 0) {
+          gvs_to_remove.push_back(&gv);
+        }
+      }
+    }
+    for (GlobalVariable *gv : gvs_to_remove) {
+      gv->eraseFromParent();
+    }
+    done = fns_to_remove.empty() && gvs_to_remove.empty();
+    outs().flush();
   }
   return true;
 }

@@ -1,7 +1,6 @@
 #ifndef __libfixmath_fix32_h__
 #define __libfixmath_fix32_h__
 
-#include "configure.h"
 #include <stdint.h>
 
 typedef int32_t fix16_t;
@@ -13,10 +12,6 @@ static const fix32_t _FOUR_DIV_PI2 = 0xFFFFFFFF983f4277;       /*!< Fix32 value 
 static const fix32_t X4_CORRECTION_COMPONENT = 0x3999999A;    /*!< Fix32 value of 0.225 */
 static const fix32_t PI_DIV_4 = 0xC90FDAA2;                   /*!< Fix32 value of PI/4 */
 static const fix32_t THREE_PI_DIV_4 = 0x25B2F8FE6;            /*!< Fix32 value of 3PI/4 */
-
-static const fix32_t fix32_maximum  = 0x7FFFFFFFFFFFFFFF;     /*!< the maximum value of fix32_t */
-static const fix32_t fix32_minimum  = 0x8000000000000000;     /*!< the maximum value of fix32_t */
-static const fix32_t fix32_overflow = 0x8000000000000000;     /*!< the value used to indicate overflows when FIXMATH_NO_OVERFLOW is not specified */
 
 static const fix32_t fix32_pi = 13493037704;                  /*!< fix32_t value of pi */
 static const fix32_t fix32_e  = 11674931555;                  /*!< fix32_t value of e */

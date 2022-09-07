@@ -1275,7 +1275,6 @@ int main(int argc, char **argv, char **envp) {
                         errorMsg))
       klee_error("error loading FixedPoint support '%s': %s", Path.c_str(),
                  errorMsg.c_str());
-
   }
 
   if (WithPOSIXRuntime) {

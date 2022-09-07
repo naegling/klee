@@ -2,29 +2,52 @@
 #include "fix32.h"
 #include "klee/klee.h"
 
-fix32_t fix32_add(fix32_t inArg0, fix32_t inArg1) {
-  return (inArg0 + inArg1);
+int fix32_rounding_dir;
+
+static const fix32_t fix32_maximum = 0x7FFFFFFFFFFFFFFE;     // the maximum value of fix32_t
+static const fix32_t fix32_mimimum = 0x8000000000000001;     // the maximum value of fix32_t
+static const fix32_t fix32_inf     = 0x7FFFFFFFFFFFFFFE;     // value selected to represent inf (only positive at this time)
+static const fix32_t fix32_nan     = 0x8000000000000000;     // value selected to represent nan
+
+fix32_t fix32_add(fix32_t a, fix32_t b) {
+
+  if (a == fix32_nan | b == fix32_nan) return fix32_nan;
+
+  // Use unsigned integers because overflow with signed integers is
+  // an undefined operation (http://www.airs.com/blog/archives/120).
+  uint64_t _a = a, _b = b;
+  uint64_t sum = _a + _b;
+
+  // Overflow can only happen if sign of a == sign of b, and then
+  // it causes sign of sum != sign of a.
+  klee_assume(!((!((_a ^ _b) & 0x8000000000000000) & ((_a ^ sum) & 0x8000000000000000))));
+  fix32_t result = sum;
+  klee_assume((result < fix32_maximum) & (result > fix32_mimimum));
+  return result;
 }
 
-fix32_t fix32_sub(fix32_t inArg0, fix32_t inArg1) {
-  return (inArg0 - inArg1);
+fix32_t fix32_sub(fix32_t a, fix32_t b) {
+
+  if (a == fix32_nan | b == fix32_nan) return fix32_nan;
+
+  uint64_t _a = a, _b = b;
+  uint64_t diff = _a - _b;
+
+  // Overflow can only happen if sign of a != sign of b, and then
+  // it causes sign of diff != sign of a.
+  klee_assume(!(((_a ^ _b) & 0x8000000000000000) & ((_a ^ diff) & 0x8000000000000000)));
+
+  fix32_t result = diff;
+  klee_assume((result < fix32_maximum) & (result > fix32_mimimum));
+  return result;
 }
 
-fix32_t fix32_mul(fix32_t inArg0, fix32_t inArg1) {
-  // Each argument is divided to 32-bit parts.
-  //					AB
-  //			*	 CD
-  // -----------
-  //					BD	32 * 32 -> 64 bit products
-  //				 CB
-  //				 AD
-  //				AC
-  //			 |----| 64 bit product
+fix32_t fix32_mul(fix32_t a, fix32_t b) {
 
-  klee_open_merge();
+  if (a == fix32_nan | b == fix32_nan) return fix32_nan;
 
-  int64_t A = (inArg0 >> 32), C = (inArg1 >> 32);
-  uint64_t B = (inArg0 & 0xFFFFFFFF), D = (inArg1 & 0xFFFFFFFF);
+  int64_t A = (a >> 32), C = (b >> 32);
+  uint64_t B = (a & 0xFFFFFFFF), D = (b & 0xFFFFFFFF);
 
   int64_t AC = A*C;
   int64_t AD_CB = A*D + C*B;
@@ -39,16 +62,16 @@ fix32_t fix32_mul(fix32_t inArg0, fix32_t inArg1) {
     product_hi++;
 
   // The upper 17 bits should all be the same (the sign).
-//  if (product_hi >> 63 != product_hi >> 31)
-//    klee_silent_exit(0);
+  klee_assume(product_hi >> 63 != product_hi >> 31);
 
   fix32_t result = (product_hi << 32) | (product_lo >> 32);
-
-  klee_close_merge();
+  klee_assume((result < fix32_maximum) & (result > fix32_mimimum));
   return result;
 }
 
 fix32_t fix32_div(fix32_t a, fix32_t b) {
+
+  if (a == fix32_nan | b == fix32_nan) return fix32_nan;
 
   fix32_t result;
   klee_make_symbolic(&result, sizeof(result), "fix32_div_result");
@@ -56,32 +79,36 @@ fix32_t fix32_div(fix32_t a, fix32_t b) {
   return result;
 }
 
-fix32_t fix32_mod(fix32_t x, fix32_t y) {
+fix32_t fix32_mod(fix32_t a, fix32_t b) {
+
+  if (a == fix32_nan | b == fix32_nan) return fix32_nan;
+
   /* Note that in C90, the sign of result of the modulo operation is
    * undefined. in C99, it's the same as the dividend (aka numerator).
    */
-  x %= y;
-  return x;
+  a %= b;
+  return a;
 }
 
 int fix32_isnan(fix32_t a) {
-  return 0;
+  return (a == fix32_nan);
 }
 
 int fix32_isinf(fix32_t a) {
-  return 0;
+  return (a == fix32_inf);
 }
 
 int fix32_isfinite(fix32_t a) {
-  return !(fix32_isnan(a) || fix32_isinf(a));
+  return !(fix32_isnan(a) | fix32_isinf(a));
 }
 
-fix32_t fix32_sqrt(fix32_t inValue) {
+fix32_t fix32_sqrt(fix32_t a) {
+
+  if (a < 0) return fix32_nan;
 
   fix32_t result;
   klee_make_symbolic(&result, sizeof(result), "fix32_sqrt_result");
-  klee_assume(inValue >= 0);
-  klee_assume(fix32_mul(result, result) == inValue);
+  klee_assume(fix32_mul(result, result) == a);
   return result;
 }
 
@@ -126,5 +153,14 @@ fix32_t fix32_clamp(fix32_t x, fix32_t lo, fix32_t hi) {
 }
 
 fix32_t fix32_sin(fix32_t inAngle) {
+  return 0;
+}
+
+int fix32_fegetround() {
+  return fix32_rounding_dir;
+}
+
+int fix32_fesetround(int rdir) {
+  fix32_rounding_dir = rdir;
   return 0;
 }

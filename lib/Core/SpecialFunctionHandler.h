@@ -140,6 +140,7 @@ namespace klee {
     HANDLER(handleRevirtObjects);
     HANDLER(handleSetForking);
     HANDLER(handleSilentExit);
+    HANDLER(handleTerminateState);
     HANDLER(handleStackTrace);
     HANDLER(handleUnderConstrained);
     HANDLER(handleWarning);

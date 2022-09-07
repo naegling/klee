@@ -10,6 +10,7 @@
 #define DEBUG_TYPE "KModule"
 
 #include "Passes.h"
+#include "FixedPointTransform.h"
 
 #include "klee/Config/Version.h"
 #include "klee/Core/Interpreter.h"
@@ -234,6 +235,7 @@ void KModule::instrument(const Interpreter::ModuleOptions &opts) {
 
   pm.add(new IntrinsicCleanerPass(*targetData));
   pm.run(*module);
+  FixedPointTransform::stripUnused(module.get());
 }
 
 void KModule::optimiseAndPrepare(

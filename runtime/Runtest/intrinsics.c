@@ -135,6 +135,7 @@ void klee_make_symbolic(void *array, size_t nbytes, const char *name) {
 }
 
 void klee_silent_exit(int x) { exit(x); }
+void klee_terminate_state()  { exit(1); }
 
 uintptr_t klee_choose(uintptr_t n) {
   uintptr_t x;
