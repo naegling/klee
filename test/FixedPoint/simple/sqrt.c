@@ -7,17 +7,16 @@ int main(int argc, char *argv[]) {
 
   double a;
   double b;
-  // double c;
   klee_make_symbolic(&a, sizeof(a), "a");
 
-  b = sqrt(a/2);
-  b = sqrt(b/2);
+  b = sqrt(a);
+  b = sqrt(b);
 
   if (b > 1.0)  {
-    printf("gt1\n");
+    printf("gt\n");
   } else if (b < 1.0) {
-    printf("lt1\n");
+    printf("lt\n");
   } else {
-    printf("eq1\n");
+    printf("eq\n");
   }
 }

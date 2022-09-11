@@ -404,6 +404,10 @@ bool FixedPointTransform::run() {
             if (Type *new_type = transformFP(SR->getType())) {
               SR->mutateType(new_type);
             }
+            auto v = SR->getPointerOperand();
+            if (Type *new_t = transformFP(v->getType())) {
+              v->mutateType(new_t);
+            }
           } break;
 
           case Instruction::GetElementPtr: {

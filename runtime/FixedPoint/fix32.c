@@ -11,71 +11,96 @@ static const fix32_t fix32_nan     = 0x8000000000000000;     // value selected t
 
 fix32_t fix32_add(fix32_t a, fix32_t b) {
 
-  if (a == fix32_nan | b == fix32_nan) return fix32_nan;
+  fix32_t result;
+  klee_open_merge();
 
-  // Use unsigned integers because overflow with signed integers is
-  // an undefined operation (http://www.airs.com/blog/archives/120).
-  uint64_t _a = a, _b = b;
-  uint64_t sum = _a + _b;
+  if (a == fix32_nan | b == fix32_nan) {
+    result = fix32_nan;
+  } else {
+    // Use unsigned integers because overflow with signed integers is
+    // an undefined operation (http://www.airs.com/blog/archives/120).
+    uint64_t _a = a, _b = b;
+    uint64_t sum = _a + _b;
 
-  // Overflow can only happen if sign of a == sign of b, and then
-  // it causes sign of sum != sign of a.
-  klee_assume(!((!((_a ^ _b) & 0x8000000000000000) & ((_a ^ sum) & 0x8000000000000000))));
-  fix32_t result = sum;
-  klee_assume((result < fix32_maximum) & (result > fix32_mimimum));
+    // Overflow can only happen if sign of a == sign of b, and then
+    // it causes sign of sum != sign of a.
+    klee_assume(((_a ^ _b) & 0x8000000000000000) | !((_a ^ sum) & 0x8000000000000000));
+
+    result = sum;
+    klee_assume((result < fix32_maximum) & (result > fix32_mimimum));
+  }
+  klee_close_merge();
   return result;
 }
 
 fix32_t fix32_sub(fix32_t a, fix32_t b) {
 
-  if (a == fix32_nan | b == fix32_nan) return fix32_nan;
+  fix32_t result;
+  klee_open_merge();
 
-  uint64_t _a = a, _b = b;
-  uint64_t diff = _a - _b;
+  if (a == fix32_nan | b == fix32_nan) {
+    result = fix32_nan;
+  } else {
+    uint64_t _a = a, _b = b;
+    uint64_t diff = _a - _b;
 
-  // Overflow can only happen if sign of a != sign of b, and then
-  // it causes sign of diff != sign of a.
-  klee_assume(!(((_a ^ _b) & 0x8000000000000000) & ((_a ^ diff) & 0x8000000000000000)));
+    // Overflow can only happen if sign of a != sign of b, and then
+    // it causes sign of diff != sign of a.
+    klee_assume(!((_a ^ _b) & 0x8000000000000000) | !((_a ^ diff) & 0x8000000000000000));
 
-  fix32_t result = diff;
-  klee_assume((result < fix32_maximum) & (result > fix32_mimimum));
+    result = diff;
+    klee_assume((result < fix32_maximum) & (result > fix32_mimimum));
+  }
+  klee_close_merge();
   return result;
 }
 
 fix32_t fix32_mul(fix32_t a, fix32_t b) {
 
-  if (a == fix32_nan | b == fix32_nan) return fix32_nan;
+  fix32_t result;
+  klee_open_merge();
 
-  int64_t A = (a >> 32), C = (b >> 32);
-  uint64_t B = (a & 0xFFFFFFFF), D = (b & 0xFFFFFFFF);
+  if (a == fix32_nan | b == fix32_nan) {
+    result = fix32_nan;
+  } else {
 
-  int64_t AC = A*C;
-  int64_t AD_CB = A*D + C*B;
-  uint64_t BD = B*D;
+    int64_t A = (a >> 32), C = (b >> 32);
+    uint64_t B = (a & 0xFFFFFFFF), D = (b & 0xFFFFFFFF);
 
-  int64_t product_hi = AC + (AD_CB >> 32);
+    int64_t AC = A*C;
+    int64_t AD_CB = A*D + C*B;
+    uint64_t BD = B*D;
 
-  // Handle carry from lower 32 bits to upper part of result.
-  uint64_t ad_cb_temp = AD_CB << 32;
-  uint64_t product_lo = BD + ad_cb_temp;
-  if (product_lo < BD)
-    product_hi++;
+    int64_t product_hi = AC + (AD_CB >> 32);
 
-  // The upper 17 bits should all be the same (the sign).
-  klee_assume(product_hi >> 63 != product_hi >> 31);
+    // Handle carry from lower 32 bits to upper part of result.
+    uint64_t ad_cb_temp = AD_CB << 32;
+    uint64_t product_lo = BD + ad_cb_temp;
 
-  fix32_t result = (product_hi << 32) | (product_lo >> 32);
-  klee_assume((result < fix32_maximum) & (result > fix32_mimimum));
+    if (product_lo < BD)
+      product_hi++;
+
+    // The upper bits should all be the same (the sign).
+    klee_assume(product_hi >> 63 == product_hi >> 31);
+
+    result = (product_hi << 32) | (product_lo >> 32);
+    klee_assume((result < fix32_maximum) & (result > fix32_mimimum));
+  }
+  klee_close_merge();
   return result;
 }
 
 fix32_t fix32_div(fix32_t a, fix32_t b) {
 
-  if (a == fix32_nan | b == fix32_nan) return fix32_nan;
-
   fix32_t result;
-  klee_make_symbolic(&result, sizeof(result), "fix32_div_result");
-  klee_assume(fix32_mul(result, b) == a);
+  klee_open_merge();
+  if (a == fix32_nan | b == fix32_nan) {
+    result = fix32_nan;
+  } else {
+    klee_make_symbolic(&result, sizeof(result), "fix32_div_result");
+    klee_assume(fix32_mul(result, b) == a);
+  }
+  klee_close_merge();
   return result;
 }
 
@@ -99,16 +124,20 @@ int fix32_isinf(fix32_t a) {
 }
 
 int fix32_isfinite(fix32_t a) {
-  return !(fix32_isnan(a) | fix32_isinf(a));
+  return (a != fix32_nan) & (a != fix32_inf);
 }
 
 fix32_t fix32_sqrt(fix32_t a) {
 
-  if (a < 0) return fix32_nan;
-
   fix32_t result;
-  klee_make_symbolic(&result, sizeof(result), "fix32_sqrt_result");
-  klee_assume(fix32_mul(result, result) == a);
+  klee_open_merge();
+  if (a == fix32_nan | a < 0) {
+    result = fix32_nan;
+  } else {
+    klee_make_symbolic(&result, sizeof(result), "fix32_sqrt_result");
+    klee_assume(fix32_mul(result, result) == a);
+  }
+  klee_close_merge();
   return result;
 }
 
