@@ -10,10 +10,10 @@ int main(int argc, char *argv[]) {
 
   double b = a / 4;
   if (b > 1.0)  {
-    printf("gt1\n");
+    printf("gt\n");
   } else if (b < 1.0) {
-    printf("lt1\n");
+    printf("lt\n");
   } else {
-    printf("eq1\n");
+    printf("eq\n");
   }
 }

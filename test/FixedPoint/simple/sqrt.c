@@ -10,7 +10,6 @@ int main(int argc, char *argv[]) {
   klee_make_symbolic(&a, sizeof(a), "a");
 
   b = sqrt(a);
-  b = sqrt(b);
 
   if (b > 1.0)  {
     printf("gt\n");
