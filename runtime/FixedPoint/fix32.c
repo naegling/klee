@@ -209,7 +209,7 @@ int fix32_isfinite(fix32_t a) {
 
 #if SQRT_SOLVER != 0
 
-fix32_t fix32_sqrt_solver(fix32_t a) {
+fix32_t fix32_sqrt(fix32_t a) {
 
   fix32_t result;
   klee_open_merge();
@@ -225,7 +225,7 @@ fix32_t fix32_sqrt_solver(fix32_t a) {
 
 #else
 
-fix32_t fix32_sqrt_direct(fix32_t a) {
+fix32_t fix32_sqrt(fix32_t a) {
 
   fix32_t result;
   klee_open_merge();
