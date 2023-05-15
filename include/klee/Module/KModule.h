@@ -14,6 +14,7 @@
 #include "klee/Core/Interpreter.h"
 
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/IR/InstrTypes.h"
 
 #include <map>
 #include <memory>
@@ -104,12 +105,23 @@ namespace klee {
     // Functions which are part of KLEE runtime
     std::set<const llvm::Function*> internalFunctions;
 
+    std::set<llvm::CallBase*> klokkos_writes;
+
   private:
     // Mark function with functionName as part of the KLEE runtime
     void addInternalFunction(const char* functionName);
 
+    void findKlokkosViewAccess(const llvm::Function *fn_add_view,
+                               std::set<llvm::Function*> &accessor_fns) const;
+    void findKlokkosAccessCalls(const llvm::Function *fn_add_view,
+                                const std::set<llvm::Function*> &accessor_fns,
+                                std::set<llvm::CallBase*> &access_instrs) const;
+    bool isValueUsedInStore(llvm::CallBase *cb) const;
+
   public:
     KModule() = default;
+
+    bool isKlokkosWriteToView(llvm::Instruction *ii) const;
 
     /// Optimise and prepare module such that KLEE can execute it
     //

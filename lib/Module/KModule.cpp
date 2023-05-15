@@ -26,6 +26,7 @@
 #if LLVM_VERSION_CODE < LLVM_VERSION(8, 0)
 #include "llvm/IR/CallSite.h"
 #endif
+#include "llvm/Demangle/Demangle.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instructions.h"
@@ -80,17 +81,17 @@ namespace {
 
   cl::opt<SwitchImplType>
   SwitchType("switch-type", cl::desc("Select the implementation of switch (default=internal)"),
-             cl::values(clEnumValN(eSwitchTypeSimple, "simple", 
+             cl::values(clEnumValN(eSwitchTypeSimple, "simple",
                                    "lower to ordered branches"),
-                        clEnumValN(eSwitchTypeLLVM, "llvm", 
+                        clEnumValN(eSwitchTypeLLVM, "llvm",
                                    "lower using LLVM"),
-                        clEnumValN(eSwitchTypeInternal, "internal", 
+                        clEnumValN(eSwitchTypeInternal, "internal",
                                    "execute switch internally")),
              cl::init(eSwitchTypeInternal),
 	     cl::cat(ModuleCat));
-  
+
   cl::opt<bool>
-  DebugPrintEscapingFunctions("debug-print-escaping-functions", 
+  DebugPrintEscapingFunctions("debug-print-escaping-functions",
                               cl::desc("Print functions whose address is taken (default=false)"),
 			      cl::cat(ModuleCat));
 
@@ -115,7 +116,7 @@ extern void Optimize(Module *, llvm::ArrayRef<const char *> preservedFunctions);
 
 // what a hack
 static Function *getStubFunctionForCtorList(Module *m,
-                                            GlobalVariable *gv, 
+                                            GlobalVariable *gv,
                                             std::string name) {
   assert(!gv->isDeclaration() && !gv->hasInternalLinkage() &&
          "do not support old LLVM style constructor/destructor lists");
@@ -124,7 +125,7 @@ static Function *getStubFunctionForCtorList(Module *m,
 
   Function *fn = Function::Create(FunctionType::get(Type::getVoidTy(m->getContext()),
 						    nullary, false),
-				  GlobalVariable::InternalLinkage, 
+				  GlobalVariable::InternalLinkage,
 				  name,
                               m);
   BasicBlock *bb = BasicBlock::Create(m->getContext(), "entry", fn);
@@ -294,6 +295,71 @@ void KModule::optimiseAndPrepare(
   pm3.run(*module);
 }
 
+void KModule::findKlokkosViewAccess(const Function *fn_add_view, std::set<Function*> &accessor_fns) const {
+
+  accessor_fns.clear();
+
+  for (auto &kf : functions) {
+    auto *fn = kf->function;
+    if (fn != fn_add_view) {
+      for (auto itr1 = fn->begin(), end1 = fn->end(); itr1 != end1; ++itr1) {
+        auto &bb = *itr1;
+        for (auto itr2 = bb.begin(), end2 = bb.end(); itr2 != end2; ++itr2) {
+          Instruction *ii = &(*itr2);
+          if (CallBase *cb = dyn_cast<CallBase>(ii)) {
+            if (cb->getCalledFunction() == fn_add_view) {
+              accessor_fns.insert(fn);
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+void KModule::findKlokkosAccessCalls(const Function *fn_add_view, const std::set<Function*> &accessor_fns, std::set<CallBase*> &access_instrs) const {
+
+  access_instrs.clear();
+  for (auto &kf : functions) {
+    auto *fn = kf->function;
+    // view accesses will not be in the add_view or access functions themselves
+    if ((fn != fn_add_view) && (accessor_fns.find(fn) == accessor_fns.end())) {
+      for (auto itr1 = fn->begin(), end1 = fn->end(); itr1 != end1; ++itr1) {
+        auto &bb = *itr1;
+        for (auto itr2 = bb.begin(), end2 = bb.end(); itr2 != end2; ++itr2) {
+          Instruction *ii = &(*itr2);
+          if (CallBase *cb = dyn_cast<CallBase>(ii)) {
+            if (accessor_fns.find(cb->getCalledFunction()) != accessor_fns.end()) {
+              // then cb is a view access instruction
+              access_instrs.insert(cb);
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+bool KModule::isValueUsedInStore(llvm::CallBase *cb) const {
+
+  for (User *u : cb->users()) {
+    if (StoreInst *si = dyn_cast<StoreInst>(u)) {
+      if (si->getPointerOperand() == cb) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool KModule::isKlokkosWriteToView(Instruction *ii) const {
+
+  if (CallBase *cb = dyn_cast<CallBase>(ii)) {
+    return klokkos_writes.find(cb) != klokkos_writes.end();
+  }
+  return false;
+}
+
 void KModule::manifest(InterpreterHandler *ih, bool forceSourceOutput) {
   if (OutputSource || forceSourceOutput) {
     std::unique_ptr<llvm::raw_fd_ostream> os(ih->openOutputFile("assembly.ll"));
@@ -346,6 +412,32 @@ void KModule::manifest(InterpreterHandler *ih, bool forceSourceOutput) {
       escapingFunctions.insert(declaration);
   }
 
+  // classify klokkos view access write instructions
+  // 1. find view access functions (could be multiple types)
+  // 2. for each, find invocating instructions
+  // 3. for each instruction, determine if used in a store operation
+
+  // each materialized view access function will call add_view_expr
+  if (Function *fn_add_view = module->getFunction("add_view_expr")) {
+
+    std::set<CallBase*> view_writes;
+
+    // step 1:
+    std::set<Function*> view_access_fns;
+    findKlokkosViewAccess(fn_add_view, view_access_fns);
+
+    // step 2:
+    std::set<CallBase*> view_access_instrs;
+    findKlokkosAccessCalls(fn_add_view, view_access_fns, view_access_instrs);
+
+    // step3:
+    for (CallBase *cb : view_access_instrs) {
+      if (isValueUsedInStore(cb)) {
+        klokkos_writes.insert(cb);
+      }
+    }
+  }
+
   if (DebugPrintEscapingFunctions && !escapingFunctions.empty()) {
     llvm::errs() << "KLEE: escaping functions: [";
     std::string delimiter = "";
@@ -384,7 +476,7 @@ KConstant* KModule::getKConstant(const Constant *c) {
 
 unsigned KModule::getConstantID(Constant *c, KInstruction* ki) {
   if (KConstant *kc = getKConstant(c))
-    return kc->id;  
+    return kc->id;
 
   unsigned id = constants.size();
   auto kc = std::unique_ptr<KConstant>(new KConstant(c, id, ki));
@@ -422,7 +514,7 @@ static int getOperandNum(Value *v,
 }
 
 KFunction::KFunction(llvm::Function *_function,
-                     KModule *km) 
+                     KModule *km)
   : function(_function),
     numArgs(function->arg_size()),
     numInstructions(0),
@@ -439,16 +531,16 @@ KFunction::KFunction(llvm::Function *_function,
 
   // The first arg_size() registers are reserved for formals.
   unsigned rnum = numArgs;
-  for (llvm::Function::iterator bbit = function->begin(), 
+  for (llvm::Function::iterator bbit = function->begin(),
          bbie = function->end(); bbit != bbie; ++bbit) {
     for (llvm::BasicBlock::iterator it = bbit->begin(), ie = bbit->end();
          it != ie; ++it)
       registerMap[&*it] = rnum++;
   }
   numRegisters = rnum;
-  
+
   unsigned i = 0;
-  for (llvm::Function::iterator bbit = function->begin(), 
+  for (llvm::Function::iterator bbit = function->begin(),
          bbie = function->end(); bbit != bbie; ++bbit) {
     for (llvm::BasicBlock::iterator it = bbit->begin(), ie = bbit->end();
          it != ie; ++it) {
